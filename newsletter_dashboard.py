@@ -13,8 +13,16 @@ from rag_engine import query_market_history
 load_dotenv()
 
 # Initialize Supabase
+# Initialize Supabase
+# Try getting from os.getenv first (local), then st.secrets (cloud)
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+
+if not supabase_url and "SUPABASE_URL" in st.secrets:
+    supabase_url = st.secrets["SUPABASE_URL"]
+if not supabase_key and "SUPABASE_SERVICE_KEY" in st.secrets:
+    supabase_key = st.secrets["SUPABASE_SERVICE_KEY"]
+
 supabase: Client = create_client(supabase_url, supabase_key)
 
 # Theme configurations

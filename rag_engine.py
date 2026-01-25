@@ -8,16 +8,43 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import streamlit as st
+
 # Initialize Supabase
 supabase_url = os.getenv("SUPABASE_URL")
 supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+
+# Fallback to st.secrets for cloud deployment
+if not supabase_url:
+    try: supabase_url = st.secrets["SUPABASE_URL"]
+    except: pass
+if not supabase_key:
+    try: supabase_key = st.secrets["SUPABASE_SERVICE_KEY"]
+    except: pass
+
 supabase: Client = create_client(supabase_url, supabase_key)
 
 # Initialize Gemini
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=os.getenv("RAG_BOT_KEY") or os.getenv("GOOGLE_KEY"))
+api_key = os.getenv("RAG_BOT_KEY") or os.getenv("GOOGLE_KEY")
+embedding_key = os.getenv("GOOGLE_EMBEDDING_KEY") or os.getenv("GOOGLE_KEY")
+
+# Fallback to st.secrets
+if not api_key:
+    try: api_key = st.secrets["RAG_BOT_KEY"]
+    except: 
+        try: api_key = st.secrets["GOOGLE_KEY"]
+        except: pass
+
+if not embedding_key:
+    try: embedding_key = st.secrets["GOOGLE_EMBEDDING_KEY"]
+    except:
+        try: embedding_key = st.secrets["GOOGLE_KEY"]
+        except: pass
+
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=api_key)
 embeddings = GoogleGenerativeAIEmbeddings(
     model="models/text-embedding-004", 
-    google_api_key=os.getenv("GOOGLE_EMBEDDING_KEY") or os.getenv("GOOGLE_KEY")
+    google_api_key=embedding_key
 )
 
 def query_market_history(question: str):
