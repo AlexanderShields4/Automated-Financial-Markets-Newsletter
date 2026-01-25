@@ -3,6 +3,7 @@
 import pandas as pd
 import json 
 import requests
+import sys
 from selenium.webdriver.chrome.service import Service
 import chromedriver_autoinstaller
 from selenium.webdriver.chrome.options import Options
@@ -360,6 +361,7 @@ def main():
         print("Successfully saved to Supabase!")
     except Exception as e:
         print(f"Error saving to Supabase: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
      main()
