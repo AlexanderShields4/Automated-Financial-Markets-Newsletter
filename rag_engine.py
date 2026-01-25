@@ -22,7 +22,14 @@ if not supabase_key:
     try: supabase_key = st.secrets["SUPABASE_SERVICE_KEY"]
     except: pass
 
-supabase: Client = create_client(supabase_url, supabase_key)
+if supabase_url and supabase_key:
+    try:
+        supabase: Client = create_client(supabase_url, supabase_key)
+    except Exception as e:
+        print(f"Supabase init error: {e}")
+        supabase = None
+else:
+    supabase = None
 
 # Initialize Gemini
 api_key = os.getenv("RAG_BOT_KEY") or os.getenv("GOOGLE_KEY")
@@ -41,16 +48,28 @@ if not embedding_key:
         try: embedding_key = st.secrets["GOOGLE_KEY"]
         except: pass
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=api_key)
-embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/text-embedding-004", 
-    google_api_key=embedding_key
-)
+if api_key:
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=api_key)
+else:
+    llm = None
+
+if embedding_key:
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004", 
+        google_api_key=embedding_key
+    )
+else:
+    embeddings = None
 
 def query_market_history(question: str):
     """
     RAG function to answer user questions about market history using Supabase and Gemini.
     """
+    if not supabase:
+        return "System Error: Supabase credentials missing. Please configure secrets."
+    if not llm or not embeddings:
+         return "System Error: Google API keys missing. Please configure secrets."
+
     try:
         # 1. Generate embedding for the question
         query_vector = embeddings.embed_query(question)
