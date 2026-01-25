@@ -45,42 +45,6 @@ FRED_API_KEY="your-fred-api-key"
 NewsApikey="your-newsapi-key"
 ```
 
-### Installation
 
-1. Create a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Database Setup:
-   Ensure your Supabase table is created. You can use the `db_setup.py` script to initialize the table and functions.
-
-## Usage
-
-### Daily Data Collection
-Run this script daily (e.g., via cron) to fetch data and generate the newsletter:
-```bash
-python newsletter_collector.py
-```
-
-### Launching the Dashboard
-Start the Streamlit interface:
-```bash
-streamlit run newsletter_dashboard.py
-```
-
-## Historical Data Import
-If you have past text write-ups, you can import them using `backfill_newsletters.py`. This script reads `.txt` files from the `Daily_write_ups/` directory, generates embeddings, and backs them up to the database.
-
-## Automation
-To automate the daily collection, add a cron job:
-```bash
-# Runs at 4:45 PM ET every weekday
 45 16 * * 1-5 cd /abspath/to/project && ./venv/bin/python newsletter_collector.py >> cron.log 2>&1
 ```
