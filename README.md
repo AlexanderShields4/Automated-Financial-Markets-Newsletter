@@ -43,8 +43,3 @@ GOOGLE_KEY="your-gemini-api-key"
 GOOGLE_EMBEDDING_KEY="your-gemini-api-key" # Can be same as above
 FRED_API_KEY="your-fred-api-key"
 NewsApikey="your-newsapi-key"
-```
-
-
-45 16 * * 1-5 cd /abspath/to/project && ./venv/bin/python newsletter_collector.py >> cron.log 2>&1
-```
