@@ -14,10 +14,21 @@ from fredapi import Fred
 from google import genai
 from dotenv import load_dotenv
 import unicodedata 
-#test
+from supabase import create_client, Client
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
 def main():
     load_dotenv()
-    # Initialize Chrome options for headless operation
+    
+    # Initialize Supabase
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+    if not supabase_url or not supabase_key:
+        print("Error: SUPABASE_URL and SUPABASE_SERVICE_KEY are required in .env")
+        return
+    supabase = create_client(supabase_url, supabase_key)
+   
+# Initialize Chrome options for headless operation
     options = Options()
     options.add_argument("--headless") 
     options.add_argument("--no-sandbox")
@@ -68,7 +79,7 @@ def main():
         '30Y-5Y': (spread_series['30Y'] - spread_series['5Y']),  # Long-term growth expectations
         '5Y-2Y': (spread_series['5Y'] - spread_series['2Y'])  # Medium-term expectations
     }
-    print(spread_calcs)
+    # print(spread_calcs) # Debug print removed
 
     for name, series in spread_calcs.items():
         spreads[name] = {date.strftime('%Y-%m-%d'): value 
@@ -167,13 +178,43 @@ def main():
     indice_data_str = ""
     for index in indices:
         try:
-            open_price = data[index]['Open'][0]
-            close_price = data[index]['Close'][0]
+            # Handle potential MultiIndex columns from yfinance
+            if isinstance(data.columns, pd.MultiIndex):
+                # Try to access using the ticker level
+                try:
+                    if index not in data.columns.levels[0]:
+                         # Ticker not in the downloaded data at all
+                         continue
+                    
+                    ticker_df = data[index]
+                    
+                    if ticker_df.empty or pd.isna(ticker_df['Open'].iloc[0]):
+                        # print(f"No data available for {index}") # Optional logging
+                        continue
+                        
+                    open_price = ticker_df['Open'].iloc[0]
+                    close_price = ticker_df['Close'].iloc[0]
+                except KeyError:
+                    print(f"Could not find data for {index}")
+                    continue
+            else:
+                 # If not multi-index, check if 'Open' exists
+                 if 'Open' not in data.columns or data.empty:
+                     continue
+                 open_price = data['Open'].iloc[0]
+                 close_price = data['Close'].iloc[0]
+
             name = symbol_names.get(index, index)
-            indice_data = f"{name}: Open: {open_price:.2f} Close: {close_price:.2f}"
+            # converting to float to avoid series printing issues
+            open_val = float(open_price)
+            close_val = float(close_price)
+            
+            indice_data = f"{name}: Open: {open_val:.2f} Close: {close_val:.2f}"
             indice_data_str += indice_data + '. '
-        except (KeyError, IndexError) as e:
-            print(f"Error getting data for {index}: {e}")
+        except (KeyError, IndexError, ValueError) as e:
+            # print(f"Error getting data for {index}: {e}")
+            pass
+            # Continue anyway
     
     # Get news
     API_KEY = os.getenv("NewsApikey")
@@ -226,7 +267,7 @@ def main():
         if i >= 40:
             break
     
-    # Save market data
+    # Structure market data
     market_data = {
         'tenyrtwoyr': tenyrtwoyr,
         'indice_data_str': indice_data_str,
@@ -237,13 +278,7 @@ def main():
         'yield_spreads': spreads
     }
     
-    with open('market_data.json', 'w') as f:
-        json.dump(market_data, f)
-    
     # Generate daily writeup
-    # Make explicit which dates the provided data covers so the model doesn't
-    # accidentally assume 'today' for data that is only available up to an
-    # earlier date (FRED and some series publish with a lag).
     data_date_notes = (
         f"Latest available spread data date: {latest_spread_date}.\n"
         f"Latest available ticker data date: {latest_ticker_date or 'N/A'}.\n"
@@ -295,28 +330,36 @@ def main():
         model="gemini-2.5-flash",
         contents=message
     ) 
-    response = str(response.text)
-    response = unicodedata.normalize("NFKD", response)
+    newsletter_text = str(response.text)
+    newsletter_text = unicodedata.normalize("NFKD", newsletter_text)
+
+    # --- SUPABASE UPSERT ---
+    print("Generating embedding for the newsletter...")
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", google_api_key=os.getenv("GOOGLE_EMBEDDING_KEY"))
+    vector = embeddings.embed_query(newsletter_text)
     
-    folder = "Daily_write_ups"
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-        
-    filename = f"{today}dailywriteup.txt"
-    filepath = os.path.join(folder, filename)
+    # Sanitize data for JSON compliance
+    def clean_json_data(obj):
+        if isinstance(obj, float):
+            return None if pd.isna(obj) or obj == float('inf') or obj == float('-inf') else obj
+        elif isinstance(obj, dict):
+            return {k: clean_json_data(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [clean_json_data(v) for v in obj]
+        return obj
+
+    data_payload = clean_json_data({
+        "date": str(today),
+        "full_text": newsletter_text,
+        "structured_data": market_data,
+        "embedding": vector
+    })
     
-    with open(filepath, "w") as f:
-        f.write(response)
-    
-    # Auto-commit the new writeup if we're not on Streamlit Cloud
-    if os.getenv('IS_STREAMLIT_CLOUD') != 'true':
-        try:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            commit_script = os.path.join(script_dir, 'commit_writeups.sh')
-            if os.path.exists(commit_script):
-                os.system(f"bash {commit_script}")
-        except Exception as e:
-            print(f"Warning: Could not auto-commit writeup: {e}")
+    try:
+        data = supabase.table("daily_briefs").upsert(data_payload, on_conflict="date").execute()
+        print("Successfully saved to Supabase!")
+    except Exception as e:
+        print(f"Error saving to Supabase: {e}")
 
 if __name__ == "__main__":
      main()

@@ -73,3 +73,10 @@ websocket-client==1.9.0
 websockets==15.0.1
 wsproto==1.2.0
 yfinance==0.2.66
+supabase
+langchain-google-genai
+langchain-community
+langchain-core
+langchain-text-splitters
+langchain-postgres
+psycopg2

@@ -4,6 +4,18 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 import plotly.express as px
+import os
+from supabase import create_client, Client
+from dotenv import load_dotenv
+from rag_engine import query_market_history
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Supabase
+supabase_url = os.getenv("SUPABASE_URL")
+supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+supabase: Client = create_client(supabase_url, supabase_key)
 
 # Theme configurations
 THEMES = {
@@ -162,67 +174,51 @@ st.markdown(f"""
         background: {"rgba(0,0,0,0.02)" if selected_theme != "Dark Mode" else "rgba(255,255,255,0.02)"};
         border-radius: 8px;
     }}
+    
+    /* Chat Interface Styles */
+    .stChatMessage {{
+        background-color: {"rgba(0,0,0,0.02)" if selected_theme != "Dark Mode" else "rgba(255,255,255,0.02)"};
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 10px;
+    }}
     </style>
     """, unsafe_allow_html=True)
 
-# Load market data
-def load_market_data():
-    # Remove caching to ensure we always get fresh data
-    import os
+# Load market data from Supabase
+def load_latest_market_data():
     try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        market_data_path = os.path.join(base_dir, 'market_data.json')
-        with open(market_data_path, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
+        response = supabase.table("daily_briefs") \
+            .select("*") \
+            .order("date", desc=True) \
+            .limit(1) \
+            .execute()
+            
+        if response.data:
+            return response.data[0]
+        return None
+    except Exception as e:
+        st.error(f"Error connecting to Supabase: {e}")
         return None
 
-def load_daily_writeup():
-    """Load the most recent daily writeup with fallback mechanisms for different hosting environments."""
-    import os
-    import glob
-    from datetime import datetime
-    import streamlit as st
-    
-    def is_streamlit_cloud():
-        """Check if we're running on Streamlit Cloud."""
-        return os.getenv('IS_STREAMLIT_CLOUD') == 'true'
-    
-    try:
-        # First try the Git-tracked Daily_write_ups directory
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        writeup_dir = os.path.join(base_dir, "Daily_write_ups")
-        writeup_files = glob.glob(os.path.join(writeup_dir, "*dailywriteup.txt"))
-        
-        if writeup_files:
-            # Sort by filename to get latest (YYYY-MM-DD format ensures chronological order)
-            latest_file = max(writeup_files)
-            with open(latest_file, 'r') as f:
-                content = f.read()
-                
-            # Store filename for display
-            latest_date = os.path.basename(latest_file).replace('dailywriteup.txt', '')
-            st.sidebar.info(f"Showing writeup from: {latest_date}")
-            
-            return content
-            
-    except Exception as e:
-        st.sidebar.error(f"Error reading writeup: {str(e)}")
-        return "Error loading the daily writeup. Please check logs for details."
-    
-    return "No daily writeups available."
+data_entry = load_latest_market_data()
 
-market_data = load_market_data()
-if not market_data:
-    st.error("Market data file not found. Please run the data collection script first.")
+if not data_entry:
+    st.warning("No market data found in the database. Please run the collector script.")
+    # Show dummy data or stop?
     st.stop()
 
-daily_writeup = load_daily_writeup()
+# Extract data
+market_data = data_entry.get("structured_data", {})
+daily_writeup = data_entry.get("full_text", "")
+report_date = data_entry.get("date", "")
+
+# Display loaded data source info
+st.sidebar.info(f"Showing brief for: {report_date}")
 
 # Main content container
 with st.container():
     # Header with dynamic date display
-    current_time = datetime.now()
     st.markdown(
         f'<p class="market-header">📊 Daily Market Newsletter</p>',
         unsafe_allow_html=True
@@ -230,192 +226,243 @@ with st.container():
     
     if show_timestamps:
         st.markdown(
-            f'<p class="timestamp">Last updated: {current_time.strftime("%B %d, %Y %I:%M %p")}</p>',
+            f'<p class="timestamp">Report Date: {report_date}</p>',
             unsafe_allow_html=True
         )
 
-    # Daily Analysis and Yield Curves in a two-column layout
-    col1, col2 = st.columns([3, 2])
-    
-    with col1:
-        # Daily Analysis in a collapsible section
-        with st.expander("📝 Today's Market Analysis", expanded=True):
-            st.markdown('<div class="market-content">', unsafe_allow_html=True)
-            st.write(daily_writeup)
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        # Yield Curve Graphs
-        st.markdown('<p class="section-header">📈 Yield Curves</p>', unsafe_allow_html=True)
+    # Tabs for Dashboard vs Chat
+    tab1, tab2 = st.tabs(["📉 Dashboard", "💬 Market Chat"])
+
+    with tab1:
+        # Daily Analysis and Yield Curves in a two-column layout
+        col1, col2 = st.columns([3, 2])
         
-        # Convert yield data to DataFrame for plotting
-        yield_data = market_data.get('yield_data', {})
-        spread_data = market_data.get('yield_spreads', {})
+        with col1:
+            # Daily Analysis in a collapsible section
+            with st.expander("📝 Today's Market Analysis", expanded=True):
+                st.markdown('<div class="market-content">', unsafe_allow_html=True)
+                st.write(daily_writeup)
+                st.markdown('</div>', unsafe_allow_html=True)
         
-        # 1. Current Yield Curve
-        tenors = ['3M', '6M', '1Y', '2Y', '3Y', '5Y', '7Y', '10Y', '20Y', '30Y']
-        
-        # Get the most recent date's yields
-        dates = set()
-        for tenor_data in yield_data.values():
-            dates.update(tenor_data.keys())
-        latest_date = max(dates) if dates else None
-        
-        current_yields = {}
-        if latest_date:
+        with col2:
+            # Yield Curve Graphs
+            st.markdown('<p class="section-header">📈 Yield Curves</p>', unsafe_allow_html=True)
+            
+            # Convert yield data to DataFrame for plotting
+            yield_data = market_data.get('yield_data', {})
+            spread_data = market_data.get('yield_spreads', {})
+            
+            # 1. Current Yield Curve
+            tenors = ['3M', '6M', '1Y', '2Y', '3Y', '5Y', '7Y', '10Y', '20Y', '30Y']
+            
+            # Get the most recent date's yields (which matches the report date hopefully)
+            # Actually, `yield_data` from collector has history. 
+            # We want the yield curve for the report date (or closest available).
+            
+            # Just grab the yields for the specific date if available, or latest in the structure
+            # The structure is yield_data[tenor][date] = value
+            
+            current_yields = {}
+            # Find closest date to report_date in data
+            
             for tenor in tenors:
-                if tenor in yield_data and latest_date in yield_data[tenor]:
-                    current_yields[tenor] = yield_data[tenor][latest_date]
+                series = yield_data.get(tenor, {})
+                if report_date in series:
+                    current_yields[tenor] = series[report_date]
+                elif series:
+                     # Check if we have data for the report date, if not use latest in that series
+                     # Ideally we match report date.
+                     current_yields[tenor] = list(series.values())[-1]
+                        
+            yields = [current_yields.get(tenor, None) for tenor in tenors]
+            fig_curve = go.Figure()
+            fig_curve.add_trace(go.Scatter(
+                x=tenors,
+                y=yields,
+                mode='lines+markers',
+                name=f'Yield Curve ({report_date})',
+                line=dict(color=theme['primary'], width=2),
+                marker=dict(size=8)
+            ))
+            fig_curve.update_layout(
+                title={
+                    'text': 'U.S. Treasury Yield Curve',
+                    'y':0.95,
+                    'x':0.5,
+                    'xanchor': 'center',
+                    'yanchor': 'top'
+                },
+                xaxis_title='Maturity',
+                yaxis_title='Yield (%)',
+                template='plotly_white',
+                height=300,
+                margin=dict(l=40, r=40, t=40, b=40),
+                showlegend=True,
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=0.01
+                ),
+                plot_bgcolor='rgba(0,0,0,0.02)' if selected_theme != "Dark Mode" else 'rgba(255,255,255,0.02)',
+                paper_bgcolor='rgba(0,0,0,0)'
+            )
+            fig_curve.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+            fig_curve.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+            st.plotly_chart(fig_curve, use_container_width=True, key='yield_curve')
+            
+            # 2. Key Spread Charts
+            spreads_to_plot = {
+                '10Y-2Y Spread': '10Y-2Y',
+                '10Y-3M Spread': '10Y-3M',
+                '5Y-2Y Spread': '5Y-2Y',
+                '30Y-5Y Spread': '30Y-5Y'
+            }
+            
+            for title, key in spreads_to_plot.items():
+                if key in spread_data:
+                    dates = [datetime.strptime(d, '%Y-%m-%d') for d in spread_data[key].keys()]
+                    dates = sorted(dates) # Ensure sorted
+                    values = [spread_data[key][d.strftime('%Y-%m-%d')] for d in dates]
                     
-        yields = [current_yields.get(tenor, None) for tenor in tenors]
-        fig_curve = go.Figure()
-        fig_curve.add_trace(go.Scatter(
-            x=tenors,
-            y=yields,
-            mode='lines+markers',
-            name=f'Yield Curve ({latest_date})',
-            line=dict(color=theme['primary'], width=2),
-            marker=dict(size=8)
-        ))
-        fig_curve.update_layout(
-            title={
-                'text': 'U.S. Treasury Yield Curve',
-                'y':0.95,
-                'x':0.5,
-                'xanchor': 'center',
-                'yanchor': 'top'
-            },
-            xaxis_title='Maturity',
-            yaxis_title='Yield (%)',
-            template='plotly_white',
-            height=300,
-            margin=dict(l=40, r=40, t=40, b=40),
-            showlegend=True,
-            legend=dict(
-                yanchor="top",
-                y=0.99,
-                xanchor="left",
-                x=0.01
-            ),
-            plot_bgcolor='rgba(0,0,0,0.02)' if selected_theme != "Dark Mode" else 'rgba(255,255,255,0.02)',
-            paper_bgcolor='rgba(0,0,0,0)'
-        )
-        fig_curve.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
-        fig_curve.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
-        st.plotly_chart(fig_curve, use_container_width=True, key='yield_curve')
-        
-        # 2. Key Spread Charts
-        spreads_to_plot = {
-            '10Y-2Y Spread': '10Y-2Y',
-            '10Y-3M Spread': '10Y-3M',
-            '5Y-2Y Spread': '5Y-2Y',
-            '30Y-5Y Spread': '30Y-5Y'
-        }
-        
-        for title, key in spreads_to_plot.items():
-            if key in spread_data:
-                dates = [datetime.strptime(d, '%Y-%m-%d') for d in spread_data[key].keys()]
-                values = list(spread_data[key].values())
-                
-                # Calculate min and max for annotation
-                latest_value = values[-1] if values else 0
-                
-                fig_spread = go.Figure()
-                fig_spread.add_trace(go.Scatter(
-                    x=dates,
-                    y=values,
-                    mode='lines',
-                    name=title,
-                    line=dict(color=theme['primary'], width=2)
-                ))
-                fig_spread.add_hline(
-                    y=0, 
-                    line_color=theme['accent'],
-                    line_dash='dash',
-                    annotation_text="Inversion Line",
-                    annotation_position="bottom right"
-                )
-                
-                # Add latest value annotation
-                fig_spread.add_annotation(
-                    x=dates[-1],
-                    y=latest_value,
-                    text=f"Latest: {latest_value:.2f}%",
-                    showarrow=True,
-                    arrowhead=1,
-                    ax=40,
-                    ay=-40 if latest_value > 0 else 40,
-                    font=dict(size=10, color=theme['text']),
-                    bgcolor='rgba(255, 255, 255, 0.8)'
-                )
-                
-                fig_spread.update_layout(
-                    title={
-                        'text': title,
-                        'y':0.95,
-                        'x':0.5,
-                        'xanchor': 'center',
-                        'yanchor': 'top'
-                    },
-                    xaxis_title='Date',
-                    yaxis_title='Spread (%)',
-                    template='plotly_white',
-                    height=250,
-                    margin=dict(l=40, r=40, t=40, b=40),
-                    showlegend=False,
-                    plot_bgcolor='rgba(0,0,0,0.02)' if selected_theme != "Dark Mode" else 'rgba(255,255,255,0.02)',
-                    paper_bgcolor='rgba(0,0,0,0)'
-                )
-                fig_spread.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
-                fig_spread.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
-                st.plotly_chart(fig_spread, use_container_width=True, key=f'spread_{key}')
+                    # Calculate min and max for annotation
+                    latest_value = values[-1] if values else 0
+                    
+                    fig_spread = go.Figure()
+                    fig_spread.add_trace(go.Scatter(
+                        x=dates,
+                        y=values,
+                        mode='lines',
+                        name=title,
+                        line=dict(color=theme['primary'], width=2)
+                    ))
+                    fig_spread.add_hline(
+                        y=0, 
+                        line_color=theme['accent'],
+                        line_dash='dash',
+                        annotation_text="Inversion Line",
+                        annotation_position="bottom right"
+                    )
+                    
+                    # Add latest value annotation
+                    if dates:
+                        fig_spread.add_annotation(
+                            x=dates[-1],
+                            y=latest_value,
+                            text=f"Latest: {latest_value:.2f}%",
+                            showarrow=True,
+                            arrowhead=1,
+                            ax=40,
+                            ay=-40 if latest_value > 0 else 40,
+                            font=dict(size=10, color=theme['text']),
+                            bgcolor='rgba(255, 255, 255, 0.8)'
+                        )
+                    
+                    fig_spread.update_layout(
+                        title={
+                            'text': title,
+                            'y':0.95,
+                            'x':0.5,
+                            'xanchor': 'center',
+                            'yanchor': 'top'
+                        },
+                        xaxis_title='Date',
+                        yaxis_title='Spread (%)',
+                        template='plotly_white',
+                        height=250,
+                        margin=dict(l=40, r=40, t=40, b=40),
+                        showlegend=False,
+                        plot_bgcolor='rgba(0,0,0,0.02)' if selected_theme != "Dark Mode" else 'rgba(255,255,255,0.02)',
+                        paper_bgcolor='rgba(0,0,0,0)'
+                    )
+                    fig_spread.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+                    fig_spread.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+                    st.plotly_chart(fig_spread, use_container_width=True, key=f'spread_{key}')
 
-    # News Headlines Section with filtering
-    st.markdown('<p class="section-header">📰 News Highlights</p>', unsafe_allow_html=True)
-    news_data = market_data['newsstr'].split('\n')[2:]  # Skip header
-    
-    # Simple news categorization (you can enhance this based on your needs)
-    def categorize_news(headline):
-        categories = []
-        keywords = {
-            "Markets": ["stock", "market", "index", "S&P", "Dow", "Nasdaq"],
-            "Economy": ["GDP", "inflation", "economy", "Fed", "rates"],
-            "Companies": ["Inc", "Corp", "Company", "CEO"],
-            "Commodities": ["oil", "gold", "commodity", "crude"],
-            "Currencies": ["dollar", "currency", "forex", "USD"]
-        }
+        # News Headlines Section with filtering
+        st.markdown('<p class="section-header">📰 News Highlights</p>', unsafe_allow_html=True)
         
-        for category, words in keywords.items():
-            if any(word.lower() in headline.lower() for word in words):
-                categories.append(category)
-        return categories if categories else ["Other"]
+        # Parse news string
+        news_str = market_data.get('newsstr', '')
+        if news_str:
+            news_data = news_str.split('\n')[2:]  # Skip header
+            
+            # Simple news categorization (you can enhance this based on your needs)
+            def categorize_news(headline):
+                categories = []
+                keywords = {
+                    "Markets": ["stock", "market", "index", "S&P", "Dow", "Nasdaq"],
+                    "Economy": ["GDP", "inflation", "economy", "Fed", "rates"],
+                    "Companies": ["Inc", "Corp", "Company", "CEO"],
+                    "Commodities": ["oil", "gold", "commodity", "crude"],
+                    "Currencies": ["dollar", "currency", "forex", "USD"]
+                }
+                
+                for category, words in keywords.items():
+                    if any(word.lower() in headline.lower() for word in words):
+                        categories.append(category)
+                return categories if categories else ["Other"]
 
-    # Filter and display news
-    filtered_news = []
-    for news_item in news_data:
-        if news_item.strip():
-            # Extract source if available
-            parts = news_item.split("Source:", 1)
-            headline = parts[0].strip()
-            source = parts[1].split("URL:")[0].strip() if len(parts) > 1 else "Unknown"
+            # Filter and display news
+            filtered_news = []
+            for news_item in news_data:
+                if news_item.strip():
+                    # Extract source if available
+                    parts = news_item.split("Source:", 1)
+                    headline = parts[0].strip()
+                    source = parts[1].split("URL:")[0].strip() if len(parts) > 1 else "Unknown"
+                    
+                    # Categorize news
+                    categories = categorize_news(headline)
+                    
+                    # Check if news matches selected categories
+                    if any(cat in news_categories for cat in categories):
+                        filtered_news.append((headline, source, categories))
             
-            # Categorize news
-            categories = categorize_news(headline)
+            # Display filtered news with enhanced formatting
+            for i, (headline, source, categories) in enumerate(filtered_news[:max_headlines]):
+                if not headline.strip():
+                    continue
+                    
+                news_html = f"""
+                <div class="news-item">
+                    <div>{headline}</div>
+                    {f'<span class="source-tag">{source}</span>' if show_news_sources else ''}
+                    {' '.join(f'<span class="source-tag">{cat}</span>' for cat in categories)}
+                </div>
+                """
+                st.markdown(news_html, unsafe_allow_html=True)
+        else:
+            st.info("No news data available.")
             
-            # Check if news matches selected categories
-            if any(cat in news_categories for cat in categories):
-                filtered_news.append((headline, source, categories))
-    
-    # Display filtered news with enhanced formatting
-    for i, (headline, source, categories) in enumerate(filtered_news[:max_headlines]):
-        if not headline.strip():
-            continue
+    with tab2:
+        st.markdown('<p class="section-header">💬 Ask about Market History</p>', unsafe_allow_html=True)
+        st.markdown("ask questions about past market trends, economic data, or previous newsletters. The chatbot uses RAG to retrieve relevant historical contexts.")
+        
+        # Initialize chat history
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
+
+        # Display chat messages from history on app rerun
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        # React to user input
+        if prompt := st.chat_input("What was the 10Y-2Y spread last month?"):
+            # Display user message in chat message container
+            st.chat_message("user").markdown(prompt)
+            # Add user message to chat history
+            st.session_state.messages.append({"role": "user", "content": prompt})
             
-        news_html = f"""
-        <div class="news-item">
-            <div>{headline}</div>
-            {f'<span class="source-tag">{source}</span>' if show_news_sources else ''}
-            {' '.join(f'<span class="source-tag">{cat}</span>' for cat in categories)}
-        </div>
-        """
-        st.markdown(news_html, unsafe_allow_html=True)
+            with st.spinner("Thinking..."):
+                response = query_market_history(prompt)
+
+            # Display assistant response in chat message container
+            with st.chat_message("assistant"):
+                st.markdown(response)
+            
+            # Add assistant response to chat history
+            st.session_state.messages.append({"role": "assistant", "content": response})
+
+
