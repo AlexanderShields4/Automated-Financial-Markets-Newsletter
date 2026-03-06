@@ -55,8 +55,9 @@ else:
 
 if embedding_key:
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004", 
-        google_api_key=embedding_key
+        model="models/gemini-embedding-001",
+        google_api_key=embedding_key,
+        output_dimensionality=768
     )
 else:
     embeddings = None
