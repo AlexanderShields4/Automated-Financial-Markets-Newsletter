@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
 
+import argparse
 import pandas as pd
-import json 
 import requests
 import sys
-from selenium.webdriver.chrome.service import Service
-import chromedriver_autoinstaller
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 import yfinance as yf
 from datetime import datetime, timedelta
-import os 
+import os
 from fredapi import Fred
 from google import genai
 from dotenv import load_dotenv
-import unicodedata 
-from supabase import create_client, Client
+import unicodedata
+from supabase import create_client
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-def main():
+def main(target_date=None):
     load_dotenv()
     
     # Initialize Supabase
@@ -28,21 +24,12 @@ def main():
         print("Error: SUPABASE_URL and SUPABASE_SERVICE_KEY are required in .env")
         return
     supabase = create_client(supabase_url, supabase_key)
-   
-# Initialize Chrome options for headless operation
-    options = Options()
-    options.add_argument("--headless") 
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    
-    # Ensure chromedriver is installed
-    chromedriver_autoinstaller.install()
-    
+
     # Initialize FRED API
     fred = Fred(api_key=os.getenv("fred_api_key"))
     
     # Get dates
-    today = datetime.now().date()
+    today = target_date if target_date is not None else datetime.now().date()
     start_date = today - timedelta(days=7)
     
     # Get Treasury yield curve data
@@ -116,7 +103,7 @@ def main():
         'CPI': 'CPIAUCSL',
         'PPI': 'PPIACO',
         'Retail Sales': 'RSAFS',
-        'Manufacturing PMI': 'NAPM',  # ISM Manufacturing PMI
+        'Durable Goods Orders': 'DGORDER',  # Manufacturers New Orders: Durable Goods
         'Consumer Confidence': 'UMCSENT',  # University of Michigan Consumer Sentiment
         'Industrial Production': 'INDPRO',  # Industrial Production Index
         'Housing Starts': 'HOUST',  # New Privately-Owned Housing Units Started
@@ -364,4 +351,8 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-     main()
+    parser = argparse.ArgumentParser(description="Collect market data and generate newsletter")
+    parser.add_argument("--date", type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
+                        default=None, help="Target date in YYYY-MM-DD format (default: today)")
+    args = parser.parse_args()
+    main(target_date=args.date)

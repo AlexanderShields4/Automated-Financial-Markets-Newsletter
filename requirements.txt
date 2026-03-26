@@ -12,8 +12,6 @@ langchain-core
 supabase
 requests
 beautifulsoup4
-chromedriver-autoinstaller
-selenium
 google-auth
 pydantic
 tenacity

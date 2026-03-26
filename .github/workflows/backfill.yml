@@ -1,13 +1,24 @@
-name: Daily Market Newsletter
+name: Backfill Newsletter
 
 on:
-  schedule:
-    # Runs at 20:45 UTC (4:45 PM ET approx) every Monday through Friday
-    - cron: '45 20 * * 1-5'
-  workflow_dispatch:  # Allows manual triggering
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Start date (YYYY-MM-DD, inclusive)'
+        required: true
+      end_date:
+        description: 'End date (YYYY-MM-DD, inclusive, default: yesterday)'
+        required: false
+        default: ''
+      force:
+        description: 'Re-run dates that already exist in the database'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
 
 jobs:
-  collect-and-publish:
+  backfill:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,7 +35,7 @@ jobs:
           --cache-to type=gha,mode=max \
           -t newsletter-app .
 
-    - name: Run Newsletter Collector in Docker
+    - name: Run Backfill
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -32,7 +43,14 @@ jobs:
         GOOGLE_EMBEDDING_KEY: ${{ secrets.GOOGLE_EMBEDDING_KEY }}
         fred_api_key: ${{ secrets.FRED_API_KEY }}
         NewsApikey: ${{ secrets.NEWSAPIKEY }}
+        START_DATE: ${{ github.event.inputs.start_date }}
+        END_DATE: ${{ github.event.inputs.end_date }}
+        FORCE: ${{ github.event.inputs.force }}
       run: |
+        ARGS="--start-date $START_DATE"
+        [ -n "$END_DATE" ] && ARGS="$ARGS --end-date $END_DATE"
+        [ "$FORCE" = "true" ] && ARGS="$ARGS --force"
+
         docker run \
           -e SUPABASE_URL \
           -e SUPABASE_SERVICE_KEY \
@@ -40,4 +58,4 @@ jobs:
           -e GOOGLE_EMBEDDING_KEY \
           -e fred_api_key \
           -e NewsApikey \
-          newsletter-app python3 newsletter_collector.py
+          newsletter-app python3 backfill.py $ARGS
