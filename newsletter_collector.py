@@ -12,7 +12,6 @@ from google import genai
 from dotenv import load_dotenv
 import unicodedata
 from supabase import create_client
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 def main(target_date=None):
     load_dotenv()
@@ -323,8 +322,12 @@ def main(target_date=None):
 
     # --- SUPABASE UPSERT ---
     print("Generating embedding for the newsletter...")
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=os.getenv("GOOGLE_EMBEDDING_KEY"), output_dimensionality=768)
-    vector = embeddings.embed_query(newsletter_text)
+    embed_response = client.models.embed_content(
+        model="models/gemini-embedding-001",
+        contents=newsletter_text,
+        config={"output_dimensionality": 768}
+    )
+    vector = embed_response.embeddings[0].values
     
     # Sanitize data for JSON compliance
     def clean_json_data(obj):

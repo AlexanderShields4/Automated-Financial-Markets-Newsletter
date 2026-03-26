@@ -40,7 +40,6 @@ jobs:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         GOOGLE_KEY: ${{ secrets.GOOGLE_KEY }}
-        GOOGLE_EMBEDDING_KEY: ${{ secrets.GOOGLE_EMBEDDING_KEY }}
         fred_api_key: ${{ secrets.FRED_API_KEY }}
         NewsApikey: ${{ secrets.NEWSAPIKEY }}
         START_DATE: ${{ github.event.inputs.start_date }}
@@ -55,7 +54,6 @@ jobs:
           -e SUPABASE_URL \
           -e SUPABASE_SERVICE_KEY \
           -e GOOGLE_KEY \
-          -e GOOGLE_EMBEDDING_KEY \
           -e fred_api_key \
           -e NewsApikey \
           newsletter-app python3 backfill.py $ARGS
