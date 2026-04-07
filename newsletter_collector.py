@@ -45,27 +45,42 @@ def main(target_date=None):
         '30Y': 'DGS30'
     }
     
-    # Get historical data for each tenor
+    # Get historical data for each tenor (with simple retry for transient FRED errors)
+    import time
     yield_data = {}
     spread_series = {}
     for tenor, series_id in yield_curves.items():
-        try:
-            series = fred.get_series(series_id, observation_start=start_date, observation_end=today)
-            # Convert timestamps to string format
-            yield_data[tenor] = {date.strftime('%Y-%m-%d'): value 
-                               for date, value in series.to_dict().items()}
-            spread_series[tenor] = series
-        except Exception as e:
-            print(f"Error fetching {series_id}: {e}")
-    
-    # Calculate important spreads
+        series = None
+        for attempt in range(3):
+            try:
+                series = fred.get_series(series_id, observation_start=start_date, observation_end=today)
+                break
+            except Exception as e:
+                print(f"Error fetching {series_id} (attempt {attempt + 1}/3): {e}")
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+        if series is None:
+            continue
+        # Convert timestamps to string format
+        yield_data[tenor] = {date.strftime('%Y-%m-%d'): value
+                           for date, value in series.to_dict().items()}
+        spread_series[tenor] = series
+
+    # Calculate important spreads (only when both legs are available)
     spreads = {}
-    spread_calcs = {
-        '10Y-2Y': (spread_series['10Y'] - spread_series['2Y']),  # Classic recession indicator
-        '10Y-3M': (spread_series['10Y'] - spread_series['3M']),  # Fed's preferred spread
-        '30Y-5Y': (spread_series['30Y'] - spread_series['5Y']),  # Long-term growth expectations
-        '5Y-2Y': (spread_series['5Y'] - spread_series['2Y'])  # Medium-term expectations
-    }
+    spread_definitions = [
+        ('10Y-2Y', '10Y', '2Y'),   # Classic recession indicator
+        ('10Y-3M', '10Y', '3M'),   # Fed's preferred spread
+        ('30Y-5Y', '30Y', '5Y'),   # Long-term growth expectations
+        ('5Y-2Y', '5Y', '2Y'),     # Medium-term expectations
+    ]
+    spread_calcs = {}
+    for name, long_leg, short_leg in spread_definitions:
+        if long_leg in spread_series and short_leg in spread_series:
+            spread_calcs[name] = spread_series[long_leg] - spread_series[short_leg]
+        else:
+            missing = [leg for leg in (long_leg, short_leg) if leg not in spread_series]
+            print(f"Skipping spread {name}: missing tenor(s) {missing}")
     # print(spread_calcs) # Debug print removed
 
     for name, series in spread_calcs.items():
@@ -73,22 +88,17 @@ def main(target_date=None):
                         for date, value in series.to_dict().items()}
     
   
-    tenyrtwoyr = [] #the ten year two year spread list 
-    for date, value in spreads['10Y-2Y'].items():
-        if pd.notnull(value):
-            tenyrtwoyr.append(f"{date}: {value:.2f}")
-    tenthreem = [] # the ten three month spread list 
-    for date, value in spreads['10Y-3M'].items():
-        if pd.notnull(value): 
-            tenthreem.append(f"{date}: {value:.2f}")
-    thirtyfivey= [] #the thirty five year spread list
-    for date, value in spreads['30Y-5Y'].items():
-        if pd.notnull(value):
-            thirtyfivey.append(f"{date}: {value:.2f}")
-    fiveytwoyr = []  # the five two year spread list 
-    for date, value in spreads['5Y-2Y'].items():    
-        if pd.notnull(value):
-            fiveytwoyr.append(f"{date}: {value:.2f}")
+    def _format_spread(name):
+        out = []
+        for date, value in spreads.get(name, {}).items():
+            if pd.notnull(value):
+                out.append(f"{date}: {value:.2f}")
+        return out
+
+    tenyrtwoyr = _format_spread('10Y-2Y')
+    tenthreem = _format_spread('10Y-3M')
+    thirtyfivey = _format_spread('30Y-5Y')
+    fiveytwoyr = _format_spread('5Y-2Y')
 
     # Determine latest available dates for spreads/yields so we can report them
     try:
